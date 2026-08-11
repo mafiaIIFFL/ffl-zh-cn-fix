@@ -1,0 +1,9 @@
+[project]
+name = "ffl-zh-cn-translation-fix"
+version = "1.0.0"
+description = "Friends for Life 1.1 简体中文翻译及 TextDatabase 修复补丁"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+
+[tool.black]
+line-length = 100

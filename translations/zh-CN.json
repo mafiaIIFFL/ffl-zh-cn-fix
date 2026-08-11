@@ -1,0 +1,24 @@
+{
+  "language": "zh-CN",
+  "mod": "Friends for Life 1.1",
+  "entries": [
+    {"id": 77010001, "key": "00_77_01_0001", "en": "Change weather/time", "zh_cn": "更改天气/时间"},
+    {"id": 77010002, "key": "00_77_01_0002", "en": "Change character model", "zh_cn": "更改角色模型"},
+    {"id": 77010003, "key": "00_77_01_0003", "en": "Police Activity options", "zh_cn": "警察活动选项"},
+    {"id": 77010004, "key": "00_77_01_0004", "en": "Change Vito Model (skin)", "zh_cn": "更改维托模型（外观）"},
+    {"id": 77010005, "key": "00_77_01_0005", "en": "Unlimited ammo cheat", "zh_cn": "无限弹药作弊"},
+    {"id": 77010006, "key": "00_77_01_0006", "en": "Change skin menu", "zh_cn": "更改外观菜单"},
+    {"id": 77010007, "key": "00_77_01_0007", "en": "Open garage", "zh_cn": "打开车库"},
+    {"id": 77010008, "key": "00_77_01_0008", "en": "Open wardrobe", "zh_cn": "打开衣柜"},
+    {"id": 77010009, "key": "00_77_01_0009", "en": "Have fun! Friends for Life Definitive Edition 1.1 // Update by: Mafia Modding", "zh_cn": "玩得开心！一生挚友 最终版 1.1 // 更新：Mafia Modding"},
+    {"id": 77010010, "key": "00_77_01_0010", "en": "Friends for Life Definitive Edition 1.1 // Update by: Mafia Modding", "zh_cn": "一生挚友 最终版 1.1 // 更新：Mafia Modding"},
+    {"id": 77010011, "key": "00_77_01_0011", "en": "Update by: Mafia Modding", "zh_cn": "更新：Mafia Modding"},
+    {"id": 77010012, "key": "00_77_01_0012", "en": "Exit from menu and save game", "zh_cn": "退出菜单并保存游戏"},
+    {"id": 77010013, "key": "00_77_01_0013", "en": "Exit from menu", "zh_cn": "退出菜单"},
+    {"id": 77010014, "key": "00_77_01_0014", "en": "Animation menu", "zh_cn": "动画菜单"},
+    {"id": 77010015, "key": "00_77_01_0015", "en": "Add MG42 to inventory", "zh_cn": "将 MG42 添加到物品栏"},
+    {"id": 77010016, "key": "00_77_01_0016", "en": "Cheat: Add all weapons", "zh_cn": "作弊：获得全部武器"},
+    {"id": 77010017, "key": "00_77_01_0017", "en": "Cheats menu", "zh_cn": "作弊菜单"},
+    {"id": 77010018, "key": "00_77_01_0018", "en": "Mafia Modding", "zh_cn": "Mafia Modding"}
+  ]
+}
