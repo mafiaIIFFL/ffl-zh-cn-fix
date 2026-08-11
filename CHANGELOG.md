@@ -1,11 +1,12 @@
 # Changelog
 
-## 1.0.0 - 2026-08-11
+## v1.0.0
 
-- 首个实机验证成功版本。
-- 修复简体中文下 Friends for Life 1.1 无法正常进入的问题。
-- 修复 `77010001~77010018` 显示 `Undefined text id`。
-- 完成 18 条 FFL 自定义文本简体中文翻译。
-- 新增自动备份、自动回滚、卸载与状态检查。
-- SDS 写入前后执行 FNV1、资源结构、round-trip 校验。
-- 仓库不分发任何原始游戏 SDS 文件。
+首个正式版本。
+
+- 修复 Friends for Life 1.1 在简体中文环境下无法正常进入的问题
+- 修复自定义菜单 `Undefined text id` 问题
+- 完成 Friends for Life 自定义菜单简体中文翻译
+- 增加自动安装、状态检查、备份和卸载恢复
+- 提供无需 Python 的独立 Windows EXE
+- Epic Games 版 + 简体中文环境已完成实机验证
