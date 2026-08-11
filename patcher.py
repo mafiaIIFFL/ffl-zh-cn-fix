@@ -27,8 +27,11 @@ import xml.etree.ElementTree as ET
 import zlib
 
 PROJECT_NAME = "FFL中文翻译及修复补丁"
-VERSION = "1.0.0"
+VERSION = "1.0.2"
 
+# FFL 1.1 在不同来源/历史版本中可能使用不同 DLC 文件夹名。
+# 启动时会自动检测实际目录，不要求玩家重命名模组文件夹。
+FFL_DIR_CANDIDATES = ("cnt_friendsforlife", "cnt_friends_for_life")
 REL_CONTENT = Path("pc/dlcs/cnt_friendsforlife/content")
 REL_ZFL_EN = Path("pc/dlcs/cnt_friendsforlife/sds_en/gui/gui-main_dlc_zfl.sds")
 REL_ZFL_SC = Path("pc/dlcs/cnt_friendsforlife/sds_sc/gui/gui-main_dlc_zfl.sds")
@@ -565,16 +568,61 @@ def patch_content(path: Path) -> None:
     path.write_bytes(bom + text.encode("utf-8"))
 
 
+def detect_ffl_dir(game_dir: Path) -> str:
+    """检测当前游戏实际使用的 Friends for Life DLC 文件夹。"""
+    dlcs = game_dir / "pc" / "dlcs"
+    if not dlcs.is_dir():
+        raise PatchError(f"游戏目录中找不到 pc\\dlcs：{dlcs}")
+
+    def looks_like_ffl(base: Path) -> bool:
+        return (
+            (base / "content").is_file()
+            and (base / "sds_en" / "gui" / "gui-main_dlc_zfl.sds").is_file()
+        )
+
+    # 先尝试已知的两个常见目录名。
+    for name in FFL_DIR_CANDIDATES:
+        if looks_like_ffl(dlcs / name):
+            return name
+
+    # 再扫描 dlcs 下其它目录，避免第三方打包改名。
+    for base in dlcs.iterdir():
+        if base.is_dir() and looks_like_ffl(base):
+            return base.name
+
+    found_dirs = sorted(p.name for p in dlcs.iterdir() if p.is_dir())
+    listing = "\n".join(f"  - {x}" for x in found_dirs) if found_dirs else "  （未发现任何 DLC 子目录）"
+    raise PatchError(
+        "未检测到 Friends for Life 1.1。\n"
+        "安装器已扫描 pc\\dlcs 下的所有 DLC 文件夹，但没有找到同时包含：\n"
+        "- content\n"
+        "- sds_en\\gui\\gui-main_dlc_zfl.sds\n\n"
+        "实际扫描到的 DLC 目录：\n" + listing + "\n\n"
+        "请确认 FFL 1.1 已安装到当前游戏目录。"
+    )
+
+
+def configure_ffl_paths(game_dir: Path) -> str:
+    global REL_CONTENT, REL_ZFL_EN, REL_ZFL_SC
+    name = detect_ffl_dir(game_dir)
+    base = Path("pc/dlcs") / name
+    REL_CONTENT = base / "content"
+    REL_ZFL_EN = base / "sds_en/gui/gui-main_dlc_zfl.sds"
+    REL_ZFL_SC = base / "sds_sc/gui/gui-main_dlc_zfl.sds"
+    return name
+
+
 def validate_game_dir(game_dir: Path) -> None:
+    ffl_name = configure_ffl_paths(game_dir)
     missing = []
     for rel in (REL_CONTENT, REL_ZFL_EN, REL_TEXT_DEFAULT):
         if not (game_dir / rel).is_file():
             missing.append(str(rel))
     if missing:
         raise PatchError(
-            "游戏目录不完整，或 Friends for Life 1.1 尚未安装。缺少：\n- " +
-            "\n- ".join(missing)
+            "游戏目录不完整。缺少：\n- " + "\n- ".join(missing)
         )
+    print(f"[OK] 已检测到 Friends for Life：pc\\dlcs\\{ffl_name}")
 
 
 def backup_files(game_dir: Path) -> Path:
@@ -753,6 +801,8 @@ def guess_game_dir(value: str | None) -> Path:
 
 
 def main(argv: list[str] | None = None) -> int:
+    print(f"[{PROJECT_NAME} v{VERSION}]")
+    print("[启动] 自动检测 Friends for Life DLC 目录已启用")
     parser = argparse.ArgumentParser(description=PROJECT_NAME)
     parser.add_argument("command", nargs="?", choices=["install", "uninstall", "status"], default="install")
     parser.add_argument("--game-dir", help="Mafia II Definitive Edition 游戏根目录")
