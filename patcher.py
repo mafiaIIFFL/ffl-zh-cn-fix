@@ -23,11 +23,12 @@ import re
 import shutil
 import struct
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
 import zlib
 
 PROJECT_NAME = "FFL中文翻译及修复补丁"
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 
 # FFL 1.1 在不同来源/历史版本中可能使用不同 DLC 文件夹名。
 # 启动时会自动检测实际目录，不要求玩家重命名模组文件夹。
@@ -43,6 +44,7 @@ BACKUP_ROOT = Path("FFL_ZH_CN_BACKUP")
 KNOWN_HASHES = {
     "text_default_epic_tested": "6b6ba43220997900fafe2c5fc765ea7d1dae8057017f3d3dbd7822c30c2c7efe",
     "zfl_en_tested": "d7c5980e8549acad6086de966ab6b4bdae0eafe494d866e54d8bf293014303a8",
+    "text_default_patched_verified": "4260635d00c95ca9c12195f3b0e8a32b7275c4c09ded3ec65c3912ab96477543",
 }
 
 
@@ -699,6 +701,24 @@ def textdb_has_ffl(path: Path, entries: list[dict[str, str]]) -> bool:
 
 
 
+def textdb_ffl_details(path: Path, entries: list[dict[str, str]]) -> tuple[list[str], list[str]]:
+    """Return (present keys, missing keys) from the active Simplified Chinese main TextDatabase."""
+    parsed = parse_sds(path)
+    root = ET.fromstring(parsed["xml"].decode("ascii"))
+    infos = root.findall("ResourceInfo")
+    idx = next(
+        i for i, ri in enumerate(infos)
+        if ri.findtext("SourceDataDescription") == "/tables/TextDatabase.dat"
+    )
+    _, _, payload = parse_memfile(parsed["resources"][idx]["data"])
+    text = payload.decode("utf-8-sig")
+    present, missing = [], []
+    for x in entries:
+        expected = f"{x['key']}:{x['zh_cn']}"
+        (present if expected in text else missing).append(x["key"])
+    return present, missing
+
+
 def is_installed(game_dir: Path, entries: list[dict[str, str]]) -> bool:
     try:
         content = (game_dir / REL_CONTENT).read_bytes().decode("utf-8-sig", errors="replace")
@@ -718,38 +738,86 @@ def install(game_dir: Path) -> None:
     print(f"[{PROJECT_NAME} v{VERSION}]")
     print("正在检查文件……")
     if is_installed(game_dir, entries):
-        print("检测到补丁已经安装，未重复修改，也未创建新的备份。")
+        print("检测到补丁已经完整安装：18/18 条简中 ID 均存在。")
+        print("未重复修改，也未创建新的备份。")
         return
-    text_hash = sha256_file(game_dir / REL_TEXT_DEFAULT)
-    zfl_hash = sha256_file(game_dir / REL_ZFL_EN)
-    if text_hash != KNOWN_HASHES["text_default_epic_tested"]:
-        print("[提示] 当前 text_default.sds 与实测 Epic 样本哈希不同，将依靠结构校验继续。")
-    if zfl_hash != KNOWN_HASHES["zfl_en_tested"]:
-        print("[提示] 当前 FFL ZFL SDS 与实测样本哈希不同，将依靠结构校验继续。")
 
-    # 先解析，确保原文件结构安全，再创建备份。
+    text_hash_before = sha256_file(game_dir / REL_TEXT_DEFAULT)
+    zfl_hash = sha256_file(game_dir / REL_ZFL_EN)
+    print(f"原始 text_default SHA256: {text_hash_before}")
+    print(f"FFL ZFL English SHA256:   {zfl_hash}")
+    if text_hash_before != KNOWN_HASHES["text_default_epic_tested"]:
+        print("[警告] 当前 text_default.sds 与实测干净 Epic 样本哈希不同。")
+        print("       将继续依靠 SDS 结构校验，但建议确认游戏文件是否为原版。")
+    if zfl_hash != KNOWN_HASHES["zfl_en_tested"]:
+        print("[警告] 当前 FFL ZFL SDS 与实测 FFL 1.1 样本哈希不同。")
+
+    # 在触碰游戏文件之前先解析原文件。
     parse_sds(game_dir / REL_TEXT_DEFAULT)
     parse_sds(game_dir / REL_ZFL_EN)
+
     backup_dir = backup_files(game_dir)
     print(f"自动备份：{backup_dir}")
 
     try:
-        patch_content(game_dir / REL_CONTENT)
-        normalize_zfl_resourceinfo(game_dir / REL_ZFL_EN, game_dir / REL_ZFL_SC)
-        patch_text_default(game_dir / REL_TEXT_DEFAULT, entries)
+        # 先在独立临时目录中生成全部候选文件。全部通过后才写回游戏。
+        with tempfile.TemporaryDirectory(prefix="ffl_zh_cn_") as td:
+            stage = Path(td)
+            staged_content = stage / "content"
+            staged_zfl = stage / "gui-main_dlc_zfl.sds"
+            staged_text = stage / "text_default.sds"
+
+            shutil.copy2(game_dir / REL_CONTENT, staged_content)
+            shutil.copy2(game_dir / REL_TEXT_DEFAULT, staged_text)
+
+            print("[1/3] 生成简中 FFL content……")
+            patch_content(staged_content)
+            print("[2/3] 生成简中 GUI SDS……")
+            normalize_zfl_resourceinfo(game_dir / REL_ZFL_EN, staged_zfl)
+            print("[3/3] 合并 77010001~77010018 到简中主文本库……")
+            patch_text_default(staged_text, entries)
+
+            present, missing = textdb_ffl_details(staged_text, entries)
+            if missing:
+                raise PatchError(
+                    f"候选文本库验证失败：仅写入 {len(present)}/18 条；缺失："
+                    + ", ".join(missing)
+                )
+
+            staged_hash = sha256_file(staged_text)
+            print(f"候选 text_default SHA256: {staged_hash}")
+            if text_hash_before == KNOWN_HASHES["text_default_epic_tested"]:
+                expected = KNOWN_HASHES["text_default_patched_verified"]
+                if staged_hash != expected:
+                    raise PatchError(
+                        "已知干净 Epic 样本生成结果与实机成功样本哈希不一致，已中止。\n"
+                        f"期望：{expected}\n实际：{staged_hash}"
+                    )
+                print("[OK] 与此前实机成功的 text_default.sds 哈希完全一致。")
+
+            # 候选文件全部通过，才开始应用。
+            print("候选文件全部验证通过，开始应用……")
+            (game_dir / REL_ZFL_SC).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(staged_content, game_dir / REL_CONTENT)
+            shutil.copy2(staged_zfl, game_dir / REL_ZFL_SC)
+            shutil.copy2(staged_text, game_dir / REL_TEXT_DEFAULT)
+
+        # 对真正写入游戏目录的结果再次验证。
+        present, missing = textdb_ffl_details(game_dir / REL_TEXT_DEFAULT, entries)
+        if missing:
+            raise PatchError("写入后验证失败，缺失：" + ", ".join(missing))
+        if not is_installed(game_dir, entries):
+            raise PatchError("写入后综合验证失败。")
+
     except Exception:
         print("安装过程中发生错误，正在自动回滚……")
         restore_backup(game_dir, backup_dir)
+        print("[OK] 已恢复到本次安装前状态。")
         raise
 
-    if not textdb_has_ffl(game_dir / REL_TEXT_DEFAULT, entries):
-        restore_backup(game_dir, backup_dir)
-        raise PatchError("安装后验证失败，已自动恢复备份。")
-
-    print("\n安装成功。")
+    print("\n安装成功：18/18 条 FFL 简中文本已验证。")
+    print(f"最终 text_default SHA256: {sha256_file(game_dir / REL_TEXT_DEFAULT)}")
     print("请将游戏语言设置为【简体中文】，进入：附加内容 → 一生挚友。")
-    print("如需恢复原状，运行 uninstall.bat 或：python patcher.py uninstall")
-
 
 def uninstall(game_dir: Path, backup: Path | None = None) -> None:
     backup = backup or find_latest_backup(game_dir)
@@ -758,7 +826,7 @@ def uninstall(game_dir: Path, backup: Path | None = None) -> None:
 
 
 def status(game_dir: Path) -> None:
-    print(f"[{PROJECT_NAME} v{VERSION}] 状态")
+    print(f"[{PROJECT_NAME} v{VERSION}] 状态检查")
     try:
         validate_game_dir(game_dir)
         print("[OK] 游戏目录与 FFL 1.1 关键文件存在")
@@ -766,6 +834,7 @@ def status(game_dir: Path) -> None:
         print(f"[X] {e}")
         return
 
+    entries = load_translations()
     content = (game_dir / REL_CONTENT).read_bytes().decode("utf-8-sig", errors="replace")
     print("[{}] Chinesesimp GameLine Mount".format(
         "OK" if 'GameLine_3_Chinesesimp' in content else "--"
@@ -776,12 +845,21 @@ def status(game_dir: Path) -> None:
     print("[{}] sds_sc/gui/gui-main_dlc_zfl.sds".format(
         "OK" if (game_dir / REL_ZFL_SC).is_file() else "--"
     ))
-    entries = load_translations()
-    print("[{}] 77010001~77010018 简中主文本库".format(
-        "OK" if textdb_has_ffl(game_dir / REL_TEXT_DEFAULT, entries) else "--"
-    ))
-    print(f"text_default SHA256: {sha256_file(game_dir / REL_TEXT_DEFAULT)}")
-
+    try:
+        present, missing = textdb_ffl_details(game_dir / REL_TEXT_DEFAULT, entries)
+        print(f"[{'OK' if not missing else '--'}] FFL 简中文本：{len(present)}/18")
+        if missing:
+            print("缺失 ID：" + ", ".join(missing))
+    except Exception as e:
+        print(f"[X] 无法读取简中主文本库：{e}")
+    h = sha256_file(game_dir / REL_TEXT_DEFAULT)
+    print(f"text_default SHA256: {h}")
+    if h == KNOWN_HASHES["text_default_epic_tested"]:
+        print("哈希状态：已知干净 Epic 简中原版")
+    elif h == KNOWN_HASHES["text_default_patched_verified"]:
+        print("哈希状态：已知实机成功 FFL 简中补丁版")
+    else:
+        print("哈希状态：未知/其他版本")
 
 def guess_game_dir(value: str | None) -> Path:
     if value:
@@ -803,28 +881,55 @@ def guess_game_dir(value: str | None) -> Path:
 def main(argv: list[str] | None = None) -> int:
     print(f"[{PROJECT_NAME} v{VERSION}]")
     print("[启动] 自动检测 Friends for Life DLC 目录已启用")
+
+    actual_argv = list(sys.argv[1:] if argv is None else argv)
+    interactive_menu = len(actual_argv) == 0
+
+    if interactive_menu:
+        print("\n请选择操作：")
+        print("  [1] 安装 / 修复补丁")
+        print("  [2] 检查补丁状态")
+        print("  [3] 卸载补丁并恢复最近一次自动备份")
+        print("  [0] 退出")
+        choice = input("> ").strip()
+        mapping = {"1": "install", "2": "status", "3": "uninstall", "0": "exit"}
+        command = mapping.get(choice)
+        if command is None:
+            print("无效选项。")
+            input("\n按回车键退出……")
+            return 2
+        if command == "exit":
+            return 0
+        actual_argv = [command]
+
     parser = argparse.ArgumentParser(description=PROJECT_NAME)
-    parser.add_argument("command", nargs="?", choices=["install", "uninstall", "status"], default="install")
+    parser.add_argument("command", choices=["install", "uninstall", "status"])
     parser.add_argument("--game-dir", help="Mafia II Definitive Edition 游戏根目录")
     parser.add_argument("--backup", help="uninstall 时指定备份目录")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(actual_argv)
 
+    rc = 0
     try:
         game_dir = guess_game_dir(args.game_dir)
         if args.command == "install":
             install(game_dir)
         elif args.command == "uninstall":
+            # 卸载前也需要识别实际 FFL 目录，使 manifest 路径与当前安装一致。
+            configure_ffl_paths(game_dir)
             b = Path(args.backup).resolve() if args.backup else None
             uninstall(game_dir, b)
         else:
             status(game_dir)
-        return 0
     except PatchError as e:
         print(f"\n[错误] {e}", file=sys.stderr)
-        return 2
+        rc = 2
     except KeyboardInterrupt:
         print("\n已取消。")
-        return 130
+        rc = 130
+
+    if interactive_menu:
+        input("\n按回车键退出……")
+    return rc
 
 
 if __name__ == "__main__":
