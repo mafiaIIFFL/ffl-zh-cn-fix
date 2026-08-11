@@ -24,6 +24,7 @@ jobs:
           pyinstaller
           --onefile
           --name "FFL-ZH-CN-Patcher"
+          --add-data "translations/zh-CN.json;translations"
           patcher.py
 
       - name: Upload Windows EXE
